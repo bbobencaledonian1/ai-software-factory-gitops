@@ -1,0 +1,22 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-coder-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coder-engine
+  template:
+    metadata:
+      labels:
+        app: coder-engine
+    spec:
+      containers:
+        - name: ollama
+          image: docker.io/ollama/ollama:latest
+          env:
+            - name: OLLAMA_MODELS
+              value: /tmp/.ollama/models
+          ports:
+            - containerPort: 11434

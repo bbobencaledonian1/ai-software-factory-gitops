@@ -1,0 +1,8 @@
+﻿apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - workspace-pvc.yaml
+  - local-coder-engine-service.yaml
+  - local-coder-engine-deployment.yaml
+  - tekton-pipeline.yaml

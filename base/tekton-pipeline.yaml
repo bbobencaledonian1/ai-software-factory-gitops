@@ -1,0 +1,173 @@
+﻿apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: ai-code-factory-with-qa-and-healing
+spec:
+  workspaces:
+    - name: shared-code-workspace
+  params:
+    - name: code-prompt
+      type: string
+      default: "Write a complete Python function called parse_telemetry(payload) that validates JSON and extracts altitude, lat, and lon."
+    - name: output-filename
+      type: string
+      default: "generated_artifact.py"
+  tasks:
+    - name: generate-code
+      workspaces:
+        - name: code-dir
+          workspace: shared-code-workspace
+      params:
+        - name: prompt-text
+          value: $(params.code-prompt)
+        - name: filename
+          value: $(params.output-filename)
+      taskSpec:
+        workspaces:
+          - name: code-dir
+        params:
+          - name: prompt-text
+            type: string
+          - name: filename
+            type: string
+        steps:
+          - name: call-coder-agent
+            image: registry.access.redhat.com/ubi9/python-311:latest
+            script: |
+              #!/bin/bash
+              set -e
+              echo "Requesting initial code from Coder Agent..."
+              PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'model': 'qwen2.5-coder:1.5b', 'prompt': sys.argv[1], 'stream': False}))" "$(params.prompt-text)")
+              
+              RESPONSE=$(curl -s -X POST http://local-coder-engine:11434/api/generate \
+                -H "Content-Type: application/json" \
+                -d "$PAYLOAD")
+
+              echo "$RESPONSE" | python3 -c '
+              import json, sys, re
+              try:
+                  data = json.load(sys.stdin)
+                  code = data.get("response", "")
+                  cleaned_code = re.sub(r"^```(?:python)?\n?", "", code.strip(), flags=re.MULTILINE)
+                  cleaned_code = re.sub(r"\n?```$", "", cleaned_code.strip(), flags=re.MULTILINE)
+                  print(cleaned_code)
+              except Exception as e:
+                  sys.exit(1)
+              ' > $(workspaces.code-dir.path)/$(params.filename)
+              echo "Initial code stored at $(workspaces.code-dir.path)/$(params.filename)"
+
+    - name: fact-check-code
+      runAfter:
+        - generate-code
+      workspaces:
+        - name: code-dir
+          workspace: shared-code-workspace
+      params:
+        - name: prompt-text
+          value: $(params.code-prompt)
+        - name: filename
+          value: $(params.output-filename)
+      taskSpec:
+        workspaces:
+          - name: code-dir
+        params:
+          - name: prompt-text
+            type: string
+          - name: filename
+            type: string
+        steps:
+          - name: quality-assurance-agent
+            image: registry.access.redhat.com/ubi9/python-311:latest
+            script: |
+              #!/bin/bash
+              set -e
+              TARGET_FILE="$(workspaces.code-dir.path)/$(params.filename)"
+              INITIAL_CODE=$(cat "$TARGET_FILE")
+              
+              echo "=== Fact-Checking & Quality Review ==="
+              REVIEW_PROMPT="You are a Senior Software QA Agent. Review this code for prompt: '$(params.prompt-text)'\n\nCode:\n$INITIAL_CODE\n\nVerify accuracy, best practices, and functional soundness. Return ONLY final Python code with no markdown."
+              
+              PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'model': 'qwen2.5-coder:1.5b', 'prompt': sys.argv[1], 'stream': False}))" "$REVIEW_PROMPT")
+              
+              REVIEW_RESPONSE=$(curl -s -X POST http://local-coder-engine:11434/api/generate \
+                -H "Content-Type: application/json" \
+                -d "$PAYLOAD")
+
+              echo "$REVIEW_RESPONSE" | python3 -c '
+              import json, sys, re
+              try:
+                  data = json.load(sys.stdin)
+                  code = data.get("response", "")
+                  cleaned_code = re.sub(r"^```(?:python)?\n?", "", code.strip(), flags=re.MULTILINE)
+                  cleaned_code = re.sub(r"\n?```$", "", cleaned_code.strip(), flags=re.MULTILINE)
+                  print(cleaned_code)
+              except Exception as e:
+                  sys.exit(1)
+              ' > "$TARGET_FILE"
+              echo "QA review complete. Updated code saved to workspace."
+
+    - name: test-and-lint-code
+      runAfter:
+        - fact-check-code
+      workspaces:
+        - name: code-dir
+          workspace: shared-code-workspace
+      params:
+        - name: filename
+          value: $(params.output-filename)
+      taskSpec:
+        workspaces:
+          - name: code-dir
+        params:
+          - name: filename
+            type: string
+        steps:
+          - name: validate-and-remediate
+            image: registry.access.redhat.com/ubi9/python-311:latest
+            script: |
+              #!/bin/bash
+              TARGET_FILE="$(workspaces.code-dir.path)/$(params.filename)"
+              
+              echo "=== Stage 1: Initial Syntax Validation ==="
+              COMPILE_ERR=$(python3 -m py_compile "$TARGET_FILE" 2>&1)
+              if [ $? -eq 0 ]; then
+                echo "SUCCESS: Code passed Python compilation on the first pass."
+                echo "=== Final Verified Code ==="
+                cat "$TARGET_FILE"
+                exit 0
+              fi
+
+              echo "WARNING: Syntax error detected: $COMPILE_ERR"
+              echo "=== Stage 2: Engaging Agent Self-Healing Loop ==="
+              BROKEN_CODE=$(cat "$TARGET_FILE")
+              FIX_PROMPT="The following Python code failed compilation:\n$COMPILE_ERR\n\nSource:\n$BROKEN_CODE\n\nFix the error and return ONLY executable Python code with no markdown."
+              
+              PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'model': 'qwen2.5-coder:1.5b', 'prompt': sys.argv[1], 'stream': False}))" "$FIX_PROMPT")
+              
+              FIX_RESPONSE=$(curl -s -X POST http://local-coder-engine:11434/api/generate \
+                -H "Content-Type: application/json" \
+                -d "$PAYLOAD")
+
+              echo "$FIX_RESPONSE" | python3 -c '
+              import json, sys, re
+              try:
+                  data = json.load(sys.stdin)
+                  code = data.get("response", "")
+                  cleaned_code = re.sub(r"^```(?:python)?\n?", "", code.strip(), flags=re.MULTILINE)
+                  cleaned_code = re.sub(r"\n?```$", "", cleaned_code.strip(), flags=re.MULTILINE)
+                  print(cleaned_code)
+              except Exception as e:
+                  sys.exit(1)
+              ' > "$TARGET_FILE"
+
+              echo "=== Stage 3: Re-validating Remediated Code ==="
+              RECHECK_ERR=$(python3 -m py_compile "$TARGET_FILE" 2>&1)
+              if [ $? -eq 0 ]; then
+                echo "RECOVERY SUCCESSFUL: Agent successfully resolved the syntax error!"
+                echo "=== Final Verified Code ==="
+                cat "$TARGET_FILE"
+                exit 0
+              else
+                echo "CRITICAL: Self-healing attempt failed: $RECHECK_ERR"
+                exit 1
+              fi
