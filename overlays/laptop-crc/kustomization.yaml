@@ -1,17 +1,16 @@
-﻿apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: local-coder-engine
-spec:
-  template:
-    spec:
-      nodeName: crc
-      containers:
-        - name: ollama
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "1Gi"
-            limits:
-              cpu: "4"
-              memory: "6Gi"
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-factory-local
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/laptop-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: local-coder-engine
+      namespace: ai-factory-local
