@@ -8,3 +8,11 @@ resources:
   - local-coder-engine-service.yaml
   - local-coder-engine-deployment.yaml
   - tekton-pipeline.yaml
+
+patches:
+  - path: patches/local-coder-engine-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: local-coder-engine
