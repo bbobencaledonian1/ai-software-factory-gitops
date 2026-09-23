@@ -1,7 +1,8 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: local-coder-engine
+  namespace: ai-factory-local
 spec:
   replicas: 1
   selector:
@@ -16,7 +17,18 @@ spec:
         - name: ollama
           image: docker.io/ollama/ollama:latest
           env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
             - name: OLLAMA_MODELS
-              value: /tmp/.ollama/models
+              value: "/tmp/.ollama/models"
           ports:
             - containerPort: 11434
+              name: http
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
