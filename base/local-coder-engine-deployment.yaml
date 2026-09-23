@@ -20,15 +20,8 @@ spec:
             - name: OLLAMA_HOST
               value: "0.0.0.0:11434"
             - name: OLLAMA_MODELS
-              value: "/tmp/.ollama/models"
+              value: /tmp/.ollama/models
           ports:
             - containerPort: 11434
               name: http
               protocol: TCP
-          resources:
-            requests:
-              cpu: "2"
-              memory: 4Gi
-            limits:
-              cpu: "4"
-              memory: 8Gi
